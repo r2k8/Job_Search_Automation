@@ -1,30 +1,34 @@
-# 🧑💻 Unified Job Search Automation
+# 🧑💻 Unified Job Search Automation (`jobbot.py`)
 
-Automate job discovery, scraping, enrichment, and AI-based resume matching — all in one Python project.  
-This tool integrates **Gmail job alerts**, **web scraping**, **Google Sheets**, **Supabase**, and **Gemini AI** to help you track and analyze job postings efficiently.
+Automate **job discovery**, **job description scraping**, **data enrichment**, and **AI-powered resume matching** — all in one Python application.  
+Integrates **Gmail job alerts**, **Selenium scraping**, **Google Sheets**, **Supabase**, and **Gemini AI** to help track and analyze job opportunities efficiently.
 
 ***
 
 ## 🚀 Features
-- **Email job alert parsing** from Google, LinkedIn, Microsoft.
-- **Job description scraping** with Selenium & BeautifulSoup.
-- **Data logging** to Google Sheets and Supabase.
-- **AI-powered analysis** of jobs vs. your resume using Google's Gemini model.
-- **Multi-source recovery** for pending/failed jobs.
-- **Configurable keywords** for targeted job hunting.
+
+- **Email job alert parsing** from Gmail (Google alerts, LinkedIn, Microsoft, …)
+- **Robust job description scraping** with Selenium & BeautifulSoup
+- **Automatic logging & status tracking** in Google Sheets
+- **Duplicate prevention** via Supabase
+- **AI-powered job matching & scoring** using your resumes with Google Gemini
+- **Multi-phase CLI** — run only what you need (`discovery`, `jd_extraction`, `scoring`, `recovery`)
+- Configurable per-role **keywords** for targeting the right jobs
+- **Safe write** — Sheets and Supabase are updated live, row-by-row
 
 ***
 
 ## 📂 Project Structure
+
 ```
-job-search-automation/
-├── main.py                # Main automation script
-├── requirements.txt       # Python packages
+job-automation/
+├── jobbot.py              # Main automation script (all phases inside)
+├── requirements.txt       # Python dependencies
 ├── sample.env             # Example environment variables (no secrets)
-├── README.md              # Project documentation
-├── .gitignore             # Ignore sensitive files (.env, creds, etc.)
-├── examples/              # Mock resumes & emails for demo purposes
-└── docs/                  # Optional screenshots/docs
+├── README.md              # Documentation
+├── .gitignore             # Ignore secrets, creds, etc.
+├── resumes/               # Resume text files (per JOB_CONFIG role)
+└── examples/              # Sample HTML/job alert test files
 ```
 
 ***
@@ -32,96 +36,147 @@ job-search-automation/
 ## ⚙️ Setup Instructions
 
 ### 1️⃣ Prerequisites
-- **Python** 3.9+
-- **pip** (Python package manager)
-- A **Google Cloud project** with Gmail & Sheets API enabled
-- **Supabase account** with a `jobs` table
-- API key for **Serper** or similar search API
-- **Firefox** installed (for Selenium WebDriver)
+- Python **3.10+**
+- **pip** installed
+- **Google Cloud Project** with Gmail API & Sheets API enabled
+- A **Google Sheet** with tabs matching the `JOB_CONFIG` roles in `jobbot.py`
+- A **Supabase** account with a `jobs` table  
+- Firefox installed (for Selenium) + Auto-managed **GeckoDriver**
+- Optional: Serper.dev API key for JD enrichment
 
 ***
 
-### 2️⃣ Install Dependencies
+### 2️⃣ Install dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
 ***
 
-### 3️⃣ Environment Variables
-Create a `.env` file in your project root (this file **must not** be committed to GitHub).
+### 3️⃣ Environment variables
 
-```bash
-SERPER_API_KEY=your_serper_api_key
+Create `.env` in the project root:
+
+```env
+SERPER_API_KEY=your_serper_key
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_service_key
 GOOGLE_SHEET_URL=your_google_sheet_url
-GOOGLE_CLOUD_PROJECT=your_gcp_project_id
+GOOGLE_CLOUD_PROJECT=your_gcp_project
 GOOGLE_CLOUD_LOCATION=us-central1
-FIREFOX_PROFILE_PATH=/path/to/firefox/profile  # Windows or Mac/Linux path
+FIREFOX_PROFILE_PATH=/path/to/Firefox/Profiles/jobs
+MATCH_SCORE_THRESHOLD=80
+GMAIL_SINCE_DAYS=14
 ```
 
-💡 Works on **Windows, macOS, and Linux** — just adjust the file path style.
-
-We’ve included a `sample.env` with placeholders for reference.
+💡 Paths differ for macOS/Linux vs Windows — adjust accordingly.
 
 ***
 
-### 4️⃣ Local Files (Do Not Commit)
-These will be created/used locally and must be added to `.gitignore`:
+### 4️⃣ Local files (DO NOT commit)
+
+Add these to `.gitignore`:
+
 ```
 .env
-token.json
-client_secrets.json
-credentials.json
-*.txt        # if you store resumes locally
+token.json                # Gmail OAuth cache
+client_secrets.json       # Gmail OAuth client
+credentials.json          # Google Sheets service account
+*.txt                     # Local resumes
 ```
 
 ***
 
-### 5️⃣ Running the Script
+## ▶️ Running phases
+
+The script supports modular **phases** that can run independently.
+
+### **1. Discovery**
+- Reads **pending** rows in Google Sheet
+- Checks **Gmail job alerts** for new jobs
+- Writes new jobs directly into the correct sheet tab, status `"Pending"`  
+**Command:**
 ```bash
-python main.py
+python jobbot.py --phase discovery
 ```
 
 ***
 
-## 🧪 Demo Mode (Safe for Public Sharing)
-If you want to share a **GitHub-safe demo** without your real data:
-1. Replace resume files with dummy text files in `/examples`.
-2. Use fake job alert HTML files for email parsing tests.
-3. Set environment variables to dummy values.
-4. Disable API calls by mocking functions if needed.
+### **2. Job Description Extraction**
+- **Now independent** — *only* runs for rows with status `Pending`, `Pending Analysis`, or `JD Retry Needed`
+- Opens each job link with **Selenium + Firefox profile**
+- Scrapes & cleans JD text (with AI assistance)
+- Updates sheet status to `"JD Extracted"`
+
+**Command:**
+```bash
+python jobbot.py --phase jd_extraction
+```
 
 ***
 
-## 🛡️ Security Notes
-- **Never** commit `.env`, credential JSON files, or real resumes.
-- The `.gitignore` is preconfigured to keep secrets safe.
-- The script **loads credentials from your `.env` file** using `python-dotenv`.
+### **3. Scoring / AI Enhancement**
+- Reads **only jobs** with status `JD Extracted`
+- **Skips** rows already `"Analyzed - High Match"`, `"Low Match"`, `"Short JD"`, `"Applied"`, `"Skipped"`, `"Job Closed"`
+- Compares JD with correct resume file for that role
+- Writes match score, summary, skills, tips to the sheet
+
+**Command:**
+```bash
+python jobbot.py --phase scoring
+```
 
 ***
 
-## 🛠️ Tech Stack
-- **Python** (requests, BeautifulSoup, Selenium, gspread, supabase-py)
-- **Google APIs** (Gmail, Sheets, Drive)
-- **Supabase** (PostgreSQL backend)
+### **4. Recovery**
+- Picks up rows with `"Processing Failed"` / `"Reprocessing Failed"`
+- Attempts enrichment (Serper API) to re-score
+
+**Command:**
+```bash
+python jobbot.py --phase recovery
+```
+
+***
+
+### **Run everything in sequence**
+```bash
+python jobbot.py
+```
+Order: discovery → jd_extraction → scoring → recovery
+
+***
+
+## 🛠️ Tech stack
+
+- **Python** (`requests`, `BeautifulSoup4`, `selenium`, `gspread`, `supabase-py`)
+- **Google APIs**: Gmail, Sheets, Drive
+- **Supabase** (Postgres backend)
 - **Firefox + GeckoDriver** (Selenium automation)
-- **Gemini AI** (via `vertexai` SDK)
-- **Serper API** (job data enrichment)
+- **Google Vertex AI** (`gemini-2.5-pro` & cheaper `gemini-1.5-flash`)
+- **Serper API** (JD enrichment fallback)
 
 ***
 
-## 📜 License
-This project is licensed under the MIT License — see `LICENSE` for details.
+## 🛡 Security & Safety
+
+- **Do NOT commit** `.env`, credentials, or resumes to GitHub
+- OAuth tokens (`token.json`) are personal
+- Supabase keys must be service keys, stored in `.env`
 
 ***
 
-## ✨ Author & Contributions
-Created as a **portfolio project** to demonstrate automation, API integration, and AI skills.  
-Contributions and issue reports are welcome — fork the repo and submit PRs.
+## ✨ Notes for Contributors
+- PRs welcome — keep each **phase** idempotent
+- Add new role keywords in `JOB_CONFIG`
+- Unit test Gmail parsing logic with `/examples` HTML files
 
 ***
 
-If you’d like, I can also **add badges, a screenshot/GIF section, and a "Quick Demo" CLI command** to make it pop more for recruiters.  
-Want me to prepare that polished version for you? That would make the README stand out even more.
+If you want, I can also add:
+- CLI examples in a **"Quick Start"** section
+- A **flow diagram** showing data movement between Gmail, Selenium, Sheets, Supabase
+- Badges for Python version, license, and Google API use  
+
+***
